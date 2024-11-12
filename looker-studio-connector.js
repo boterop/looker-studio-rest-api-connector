@@ -1,96 +1,97 @@
-// Initialize the Community Connector using the DataStudioApp service
-let communityConnector = DataStudioApp.createCommunityConnector();
+// Base API endpoint for fetching university data
+const BASE_URL = "http://universities.hipolabs.com/search";
 
-// Define the schema for the data structure of the connector
-let schema = [    
-    {name: 'alpha_two_code', label: 'Alpha Two Code', dataType: 'STRING', semantics: {conceptType: 'DIMENSION'}},
-    {name: 'country', label: 'Country', dataType: 'STRING', semantics: {conceptType: 'DIMENSION'}},    
-    {name: 'name', label: 'Name', dataType: 'STRING', semantics: {conceptType: 'DIMENSION'}},    
+// Initialize the Community Connector using the DataStudioApp service
+const communityConnector = DataStudioApp.createCommunityConnector();
+
+const schema = [
+  {
+    name: "id",
+    label: "ID",
+    dataType: "string",
+    semantics: { conceptType: "DIMENSION" },
+  },
 ];
 
 // Return the defined schema to Data Studio
-function getSchema(request) {
-    return { schema: schema };
+const getSchema = (request) => {
+  return { schema: schema };
 };
 
 // Define the configuration settings for the connector, including user input fields
-function getConfig(request) {
-    let config = communityConnector.getConfig();
+const getConfig = (request) => {
+  let config = communityConnector.getConfig();
 
-    config.newInfo()
-        .setId('instructions')
-        .setText('Enter Country Name to fetch university data.');
+  config
+    .newInfo()
+    .setId("instructions")
+    .setText("Enter your API credentials and select the fields you want to display.");
 
-    config.newTextInput()
-        .setId('country')
-        .setName('Country')
-        .setHelpText('Enter the country for which you want to fetch university data.')
-        .setPlaceholder('USA')
-        .setAllowOverride(true);
+  // Basic authentication
+  createInput(config, "Company ID", "Enter your Company ID", false);
+  createInput(config, "Username", "Enter your API username", false);
+  createInput(config, "Password", "Enter your API password", false);
 
-    return config.build();
-}
+  createInput(
+    config,
+    "API URL",
+    "Enter the API URL for fetching siag data. Default is /pesv/vehiculo"
+  );
 
-function getData(request) {
+  return config.build();
+};
 
-    // Get the fields requested by Looker Studio
-    let dataSchema = [];
-    request.fields.forEach(function (field) {
-        for (const element of schema) {
-            if (element.name == field.name) {
-                dataSchema.push(element);
-                break;
-            }
-        }
-    });
+const getData = (request) => {
+  // Get the fields requested by Looker Studio
+  let dataSchema = request.fields.map((field) => ({
+    name: idlize(field.name),
+    label: field.name,
+    dataType: "STRING",
+    semantics: { conceptType: "DIMENSION" },
+  }));
 
-    // Base API endpoint for fetching university data
-    let BASE_URL = 'http://universities.hipolabs.com/search';
+  // Construct the API URL based on user input
+  let url = `${BASE_URL}${request.configParams.apiUrl}`;
 
-    // Construct the API URL based on user input
-    let countryParam = request.configParams.country;
-    let url = BASE_URL + ((countryParam != null && countryParam != '') ? '?country=' + encodeURIComponent(countryParam) : '');
-    
-    // Fetch and parse the API response
-    let response = UrlFetchApp.fetch(url);
-    let parsedResponse = JSON.parse(response);
-    let rows = [];
+  // Fetch and parse the API response
+  const response = UrlFetchApp.fetch(url);
+  const parsedResponse = JSON.parse(response);
 
-    // Map the API response to the schema for Data Studio
-    parsedResponse.forEach(function(university) {
-        let row = [];
-        request.fields.forEach(function(field) {
-            switch (field.name) {
-                case 'name':
-                    row.push(university.name);
-                    break;
-                case 'country':
-                    row.push(university.country);
-                    break;
-                case 'alpha_two_code':
-                    row.push(university.alpha_two_code);
-                    break;
-                default:
-                    row.push('');
-            }
-        });
-        rows.push({ values: row });
-    });
+  // Map the API response to the schema for Data Studio
+  const rows = parsedResponse.map((university) => ({
+    values: request.fields.map((field) => university[field.name]),
+  }));
 
-    return {
-        schema: dataSchema,
-        rows: rows
-    };
-}
+  return {
+    schema: dataSchema,
+    rows: rows,
+  };
+};
 
 // Specify the authentication type for the connector
-function getAuthType() {
-    // This connector does not require authentication
-    return { type: 'NONE' };
-}
+const getAuthType = () =>
+  communityConnector
+    .newAuthTypeResponse()
+    .setAuthType(communityConnector.AuthType.USER_PASS)
+    .setHelpUrl(`${BASE_URL}/seguridad/login`)
+    .build();
+
+const isAuthValid = () => true;
 
 // Check if the current user has administrative privileges
-function isAdminUser() {
-    // For this example, all users are treated as admin users
-    return true;
-}
+const isAdminUser = () => {
+  // For this example, all users are treated as admin users
+  return true;
+};
+
+// User-defined functions
+
+const idlize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+const createInput = (config, name, helpText, override = true) =>
+  config
+    .newTextInput()
+    .setId(idlize(name))
+    .setName(name)
+    .setHelpText(helpText)
+    .setAllowOverride(override);
