@@ -64,6 +64,9 @@ const getSchema = (request) => {
     return sendError("invalid credentials");
   }
 
+  const userProperties = PropertiesService.getUserProperties();
+  userProperties.setProperty("token", token);
+
   // Creating schema
   try {
     const response = UrlFetchApp.fetch(`${BASE_URL}${endpoint}`, {
@@ -93,6 +96,7 @@ const getSchema = (request) => {
       })
       .filter((schema) => schema.name && schema.label && schema.dataType);
 
+    userProperties.setProperty("schema", JSON.stringify(schema));
     return { schema };
   } catch (error) {
     sendError(`Error creating schema: ${error.message}`);
@@ -100,23 +104,29 @@ const getSchema = (request) => {
 };
 
 const getData = (request) => {
+  const userProperties = PropertiesService.getUserProperties();
+  const schema = JSON.parse(userProperties.getProperty("schema"));
+  const token = userProperties.getProperty("token");
+
   // Get the fields requested by Looker Studio
-  const dataSchema = request.fields.map((field) => ({
-    name: idlize(field.name),
-    label: field.name,
-    dataType: "STRING",
-    semantics: { conceptType: "DIMENSION" },
-  }));
+  const dataSchema = request.fields.map((field) =>
+    findField(schema, field.name)
+  );
 
   // Fetch and parse the API response
   const response = UrlFetchApp.fetch(
-    `${BASE_URL}${request.configParams.apiUrl}`
+    `${BASE_URL}${request.configParams.endpoint}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
   );
-  const parsedResponse = JSON.parse(response);
+  const { data: dataList } = JSON.parse(response);
 
   // Map the API response to the schema for Data Studio
-  const rows = parsedResponse.map((university) => ({
-    values: request.fields.map((field) => university[field.name]),
+  const rows = dataList.map((data) => ({
+    values: request.fields.map((field) => data[field.name]),
   }));
 
   return {
@@ -211,3 +221,25 @@ const sendError = (error, debugError = null) =>
     .setDebugText(debugError || error)
     .setText(error)
     .throwException();
+
+/**
+ * Retrieves a field from the schema by its name.
+ *
+ * This function searches the provided schema for a field that matches the specified name.
+ * If the field is found, it returns the field object; otherwise, it sends an error message and returns null.
+ *
+ * @function findField
+ * @param {Array<Object>} schema - An array of field objects representing the schema.
+ * @param {string} name - The name of the field to search for in the schema.
+ * @returns {Object|null} The field object if found, or null if not found.
+ */
+const findField = (schema, name) => {
+  const field = schema.find((field) => field.name === name);
+
+  if (!field) {
+    sendError(`Field ${name} not found in schema`);
+    return null;
+  }
+
+  return field;
+};
