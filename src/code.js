@@ -1,29 +1,5 @@
-// Base API endpoint for fetching university data
 const BASE_URL = "https://sgsst.co/api";
-
-// Initialize the Community Connector using the DataStudioApp service
 const communityConnector = DataStudioApp.createCommunityConnector();
-
-const schema = [
-  {
-    name: "alpha_two_code",
-    label: "Alpha Two Code",
-    dataType: "STRING",
-    semantics: { conceptType: "DIMENSION" },
-  },
-  {
-    name: "country",
-    label: "Country",
-    dataType: "STRING",
-    semantics: { conceptType: "DIMENSION" },
-  },
-  {
-    name: "name",
-    label: "Name",
-    dataType: "STRING",
-    semantics: { conceptType: "DIMENSION" },
-  },
-];
 
 // Define the configuration settings for the connector, including user input fields
 const getConfig = (request) => {
@@ -56,6 +32,7 @@ const getConfig = (request) => {
     "Endpoint",
     "Enter the endpoint for fetching siag data. Default is /pesv/vehiculo",
     {
+      override: false,
       required: true,
     }
   );
@@ -63,26 +40,63 @@ const getConfig = (request) => {
   return config.build();
 };
 
-// Return the defined schema to Data Studio
 const getSchema = (request) => {
-  const requiredError = { errorCode: "Please enter all required fields" };
-  if (!request.configParams) {
-    return requiredError;
+  const params = request.configParams;
+
+  if (!params) {
+    return sendError("Please enter all required fields");
   }
 
-  const { endpoint, company_id, user_name, password } = request.configParams;
+  const requiredParams = ["company_id", "username", "password", "endpoint"];
 
-  if (!endpoint || !company_id || !user_name || !password) {
-    return requiredError;
-  }
+  requiredParams.forEach((param) => {
+    if (!params[param]) {
+      return sendError(`Missing required parameter: ${param}`);
+    }
+  });
 
-  const token = login(company_id, user_name, password);
+  const { endpoint, company_id, username, password } = params;
+
+  // Login
+  const token = login(company_id, username, password);
 
   if (!token) {
-    return { errorCode: "INVALID_CREDENTIALS" };
+    return sendError("invalid credentials");
   }
 
-  return { schema: schema };
+  // Creating schema
+  try {
+    const response = UrlFetchApp.fetch(`${BASE_URL}${endpoint}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const { data: dataList } = JSON.parse(response);
+    const data = dataList.shift();
+
+    const validTypes = ["STRING", "NUMBER", "BOOLEAN"];
+    const schema = Object.keys(data)
+      .map((key) => {
+        const dataType = (typeof data[key]).toUpperCase();
+
+        if (!validTypes.includes(dataType)) {
+          return {};
+        }
+
+        return {
+          name: idlize(key),
+          label: key,
+          dataType,
+          semantics: { conceptType: "DIMENSION" },
+        };
+      })
+      .filter((schema) => schema.name && schema.label && schema.dataType);
+
+    return { schema };
+  } catch (error) {
+    sendError(`Error creating schema: ${error.message}`);
+  }
 };
 
 const getData = (request) => {
@@ -113,6 +127,19 @@ const getData = (request) => {
 
 // User-defined functions
 
+/**
+ * Authenticates a user by sending login credentials to the server.
+ *
+ * This function constructs a login request using the provided company ID, username, and password.
+ * It sends a POST request to the login endpoint and returns the user data if the authentication is successful.
+ * If any of the required parameters are missing or if an error occurs during the request, it returns null.
+ *
+ * @function login
+ * @param {string} companyId - The ID of the company the user is associated with.
+ * @param {string} userName - The username of the user attempting to log in.
+ * @param {string} password - The password of the user attempting to log in.
+ * @returns {Object|null} The user data returned from the server if authentication is successful, or null if unsuccessful.
+ */
 const login = (companyId, userName, password) => {
   const url = `${BASE_URL}/seguridad/login`;
 
@@ -141,12 +168,46 @@ const login = (companyId, userName, password) => {
   }
 };
 
+/**
+ * Converts a string into a lowercase, underscore-separated identifier.
+ *
+ * This function transforms the input string by converting all characters to lowercase and replacing
+ * any non-alphanumeric characters with underscores. This is useful for creating standardized identifiers
+ * that can be safely used in various contexts, such as variable names or database keys.
+ *
+ * @function idlize
+ * @param {string} str - The input string to be transformed.
+ * @returns {string} The transformed string, formatted as a lowercase identifier with underscores.
+ */
 const idlize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
-const createInput = (config, name, helpText, args = {}) =>
+const createInput = (
+  config,
+  name,
+  helpText,
+  { required = false, override = true } = {}
+) =>
   config
     .newTextInput()
     .setId(idlize(name))
-    .setName(`${name} ${args.required ? "*" : ""}`)
+    .setName(`${name} ${required ? "*" : ""}`)
     .setHelpText(helpText)
-    .setAllowOverride(args.override || true);
+    .setAllowOverride(override);
+
+/**
+ * Sends an error message to the community connector.
+ *
+ * This function creates a new user error with the specified error message and optional debug information.
+ * It then throws the exception to notify the user of the error encountered during execution.
+ *
+ * @function sendError
+ * @param {string} error - The error message to be displayed to the user.
+ * @param {string|null} [debugError=null] - Optional debug information to be logged; if not provided, the main error message is used.
+ * @throws {Error} Throws an exception with the user error message.
+ */
+const sendError = (error, debugError = null) =>
+  communityConnector
+    .newUserError()
+    .setDebugText(debugError || error)
+    .setText(error)
+    .throwException();
