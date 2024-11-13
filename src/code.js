@@ -1,14 +1,26 @@
 // Base API endpoint for fetching university data
-const BASE_URL = "http://universities.hipolabs.com/search";
+const BASE_URL = "https://sgsst.co/api";
 
 // Initialize the Community Connector using the DataStudioApp service
 const communityConnector = DataStudioApp.createCommunityConnector();
 
 const schema = [
   {
-    name: "id",
-    label: "ID",
-    dataType: "string",
+    name: "alpha_two_code",
+    label: "Alpha Two Code",
+    dataType: "STRING",
+    semantics: { conceptType: "DIMENSION" },
+  },
+  {
+    name: "country",
+    label: "Country",
+    dataType: "STRING",
+    semantics: { conceptType: "DIMENSION" },
+  },
+  {
+    name: "name",
+    label: "Name",
+    dataType: "STRING",
     semantics: { conceptType: "DIMENSION" },
   },
 ];
@@ -20,12 +32,14 @@ const getSchema = (request) => {
 
 // Define the configuration settings for the connector, including user input fields
 const getConfig = (request) => {
-  let config = communityConnector.getConfig();
+  const config = communityConnector.getConfig();
 
   config
     .newInfo()
     .setId("instructions")
-    .setText("Enter your API credentials and select the fields you want to display.");
+    .setText(
+      "Enter your API credentials and select the fields you want to display."
+    );
 
   // Basic authentication
   createInput(config, "Company ID", "Enter your Company ID", false);
@@ -43,7 +57,7 @@ const getConfig = (request) => {
 
 const getData = (request) => {
   // Get the fields requested by Looker Studio
-  let dataSchema = request.fields.map((field) => ({
+  const dataSchema = request.fields.map((field) => ({
     name: idlize(field.name),
     label: field.name,
     dataType: "STRING",
@@ -51,7 +65,7 @@ const getData = (request) => {
   }));
 
   // Construct the API URL based on user input
-  let url = `${BASE_URL}${request.configParams.apiUrl}`;
+  const url = `${BASE_URL}${request.configParams.apiUrl}`;
 
   // Fetch and parse the API response
   const response = UrlFetchApp.fetch(url);
@@ -73,10 +87,33 @@ const getAuthType = () =>
   communityConnector
     .newAuthTypeResponse()
     .setAuthType(communityConnector.AuthType.USER_PASS)
-    .setHelpUrl(`${BASE_URL}/seguridad/login`)
+    .setHelpUrl(`${BASE_URL}/api-docs`)
     .build();
 
-const isAuthValid = () => true;
+const isAuthValid = () => {
+  const userProperties = PropertiesService.getUserProperties();
+  const companyId = userProperties.getProperty("dscc.company_id");
+  const userName = userProperties.getProperty("dscc.username");
+  const password = userProperties.getProperty("dscc.password");
+
+  return login(companyId, userName, password);
+};
+
+const setCredentials = (request) => {
+  const { username, password } = request.userPass;
+
+  const userProperties = PropertiesService.getUserProperties();
+  userProperties.setProperty("dscc.username", username);
+  userProperties.setProperty("dscc.password", password);
+  return { errorCode: "NONE" };
+};
+
+const resetAuth = () => {
+  const userProperties = PropertiesService.getUserProperties();
+  // userProperties.deleteProperty("dscc.company_id");
+  userProperties.deleteProperty("dscc.username");
+  userProperties.deleteProperty("dscc.password");
+};
 
 // Check if the current user has administrative privileges
 const isAdminUser = () => {
@@ -85,6 +122,28 @@ const isAdminUser = () => {
 };
 
 // User-defined functions
+
+const login = (companyId, userName, password) => {
+  const url = `${BASE_URL}/seguridad/login`;
+  const payload = {
+    id_empresa: companyId,
+    usuario: userName,
+    clave: password,
+  };
+
+  Logger.log(url);
+  Logger.log(payload);
+
+  // Fetch and parse the API response
+  const response = UrlFetchApp.fetch(url, {
+    method: "POST",
+    payload: JSON.stringify(payload),
+    contentType: "application/json",
+  });
+  const parsedResponse = JSON.parse(response);
+
+  return parsedResponse.success;
+};
 
 const idlize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
